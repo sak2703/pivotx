@@ -18,7 +18,7 @@ def analyze_columns(file_path):
     return df.dtypes
 
 if __name__ == "__main__":
-    print("lol")
+    #print("lol")
     selected_file = get_excel_file()
     
     if selected_file:
