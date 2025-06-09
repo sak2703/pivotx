@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, simpledialog, ttk
+from tkinter import filedialog, ttk, messagebox
 import pandas as pd
 
 def get_excel_file():
@@ -12,26 +12,81 @@ def get_excel_file():
     root.destroy()
     return file_path
 
-def get_pivot_params():
-    root = tk.Tk()
-    root.withdraw()
-    index = simpledialog.askstring("Input", "Enter column names for index (comma separated):")
-    columns = simpledialog.askstring("Input", "Enter column names for columns (comma separated):")
-    values = simpledialog.askstring("Input", "Enter column names for values (comma separated):")
-    aggfunc = simpledialog.askstring("Input", "Enter aggregation function (e.g., sum, mean, count):")
-    fill_value = simpledialog.askstring("Input", "Enter fill value (leave blank for None):")
-    root.destroy()
-    # Process inputs
-    index = [i.strip() for i in index.split(",")] if index else None
-    columns = [c.strip() for c in columns.split(",")] if columns else None
-    values = [v.strip() for v in values.split(",")] if values else None
-    aggfunc = aggfunc.strip() if aggfunc else 'sum'
-    fill_value = fill_value.strip() if fill_value else None
-    return index, columns, values, aggfunc, fill_value
+def get_pivot_params(df):
+    # Helper to get columns from DataFrame
+    columns = list(df.columns)
+    selected = {'index': [], 'columns': [], 'values': [], 'aggfunc': 'sum', 'fill_value': None}
+    done = {'status': False}
 
-def analyze_columns(file_path):
-    df = pd.read_excel(file_path)
-    return df
+    def on_submit():
+        # Gather selections
+        selected['index'] = [col for col, var in index_vars.items() if var.get()]
+        selected['columns'] = [col for col, var in columns_vars.items() if var.get()]
+        selected['values'] = [col for col, var in values_vars.items() if var.get()]
+        selected['aggfunc'] = aggfunc_var.get()
+        fv = fill_value_var.get()
+        selected['fill_value'] = None if fv.strip() == '' else fv
+        done['status'] = True
+        param_win.destroy()
+
+    def on_cancel():
+        done['status'] = False
+        param_win.destroy()
+
+    param_win = tk.Tk()
+    param_win.title("Select Pivot Table Parameters")
+
+    # Index selection
+    tk.Label(param_win, text="Select index columns:").grid(row=0, column=0, sticky='w')
+    index_vars = {col: tk.BooleanVar() for col in columns}
+    for i, col in enumerate(columns):
+        tk.Checkbutton(param_win, text=col, variable=index_vars[col]).grid(row=1, column=i, sticky='w')
+
+    # Columns selection
+    tk.Label(param_win, text="Select columns:").grid(row=2, column=0, sticky='w')
+    columns_vars = {col: tk.BooleanVar() for col in columns}
+    for i, col in enumerate(columns):
+        tk.Checkbutton(param_win, text=col, variable=columns_vars[col]).grid(row=3, column=i, sticky='w')
+
+    # Values selection
+    tk.Label(param_win, text="Select values:").grid(row=4, column=0, sticky='w')
+    values_vars = {col: tk.BooleanVar() for col in columns}
+    for i, col in enumerate(columns):
+        tk.Checkbutton(param_win, text=col, variable=values_vars[col]).grid(row=5, column=i, sticky='w')
+
+    # Aggregation function
+    tk.Label(param_win, text="Aggregation function:").grid(row=6, column=0, sticky='w')
+    aggfunc_var = tk.StringVar(value='sum')
+    aggfunc_options = ['sum', 'mean', 'count', 'min', 'max', 'median', 'std', 'var']
+    aggfunc_menu = ttk.Combobox(param_win, textvariable=aggfunc_var, values=aggfunc_options, state='readonly')
+    aggfunc_menu.grid(row=6, column=1, sticky='w')
+
+    # Fill value
+    tk.Label(param_win, text="Fill value (optional):").grid(row=7, column=0, sticky='w')
+    fill_value_var = tk.StringVar()
+    tk.Entry(param_win, textvariable=fill_value_var).grid(row=7, column=1, sticky='w')
+
+    # Buttons
+    tk.Button(param_win, text="Submit", command=on_submit).grid(row=8, column=0, pady=10)
+    tk.Button(param_win, text="Cancel", command=on_cancel).grid(row=8, column=1, pady=10)
+
+    param_win.mainloop()
+
+    if not done['status']:
+        return None, None, None, None, None
+
+    # Convert empty lists to None for pandas
+    for key in ['index', 'columns', 'values']:
+        if not selected[key]:
+            selected[key] = None
+    # Try to convert fill_value to numeric if possible
+    fv = selected['fill_value']
+    if fv is not None:
+        try:
+            selected['fill_value'] = float(fv)
+        except ValueError:
+            pass
+    return selected['index'], selected['columns'], selected['values'], selected['aggfunc'], selected['fill_value']
 
 def display_pivot_table(pivot_df):
     root = tk.Tk()
@@ -39,7 +94,10 @@ def display_pivot_table(pivot_df):
     tree = ttk.Treeview(root)
     tree.pack(expand=True, fill='both')
     # Flatten MultiIndex columns if present
-    cols = [" ".join([str(i) for i in col]).strip() if isinstance(col, tuple) else str(col) for col in pivot_df.columns]
+    if isinstance(pivot_df.columns, pd.MultiIndex):
+        cols = [" ".join([str(i) for i in col]).strip() for col in pivot_df.columns]
+    else:
+        cols = [str(col) for col in pivot_df.columns]
     tree['columns'] = cols
     tree['show'] = 'headings'
     for col in cols:
@@ -51,17 +109,16 @@ def display_pivot_table(pivot_df):
 
 if __name__ == "__main__":
     selected_file = get_excel_file()
-    if selected_file:
-        df = analyze_columns(selected_file)
-        index, columns, values, aggfunc, fill_value = get_pivot_params()
-        # Convert fill_value to appropriate type
-        if fill_value == '':
-            fill_value = None
-        else:
-            try:
-                fill_value = float(fill_value)
-            except ValueError:
-                pass
+    if not selected_file:
+        print("No file selected")
+        exit()
+    df = pd.read_excel(selected_file)
+    params = get_pivot_params(df)
+    if any(param is None for param in params):
+        print("Pivot table creation cancelled by user.")
+        exit()
+    index, columns, values, aggfunc, fill_value = params
+    try:
         pivot_table = pd.pivot_table(
             df,
             index=index,
@@ -71,5 +128,5 @@ if __name__ == "__main__":
             fill_value=fill_value
         )
         display_pivot_table(pivot_table)
-    else:
-        print("No file selected")
+    except Exception as e:
+        messagebox.showerror("Error", f"Could not create pivot table:\n{e}")
